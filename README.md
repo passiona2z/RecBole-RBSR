@@ -36,9 +36,13 @@
 | |
 
 ## Dataset
-- 아마존 5-score 데이터셋(리뷰포함)
-    - 업로드(MI, AM) 
-- 변환 코드 구현 Based on [RecSysDatasets](https://github.com/RUCAIBox/RecSysDatasets) (update soon).
+[Amazon Review 5-core dataset](https://jmcauley.ucsd.edu/data/amazon/index_2014.html)
+
+- Provided subsets:
+  - Musical Instruments (MI)
+  - Automotive (AM)
+
+- Data conversion scripts Based on [RecSysDatasets](https://github.com/RUCAIBox/RecSysDatasets) will be update soon 
 
 ## Example Usage
 
