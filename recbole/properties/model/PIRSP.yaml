@@ -1,0 +1,10 @@
+#loss_type: 'CE'                 # (str) The type of loss function. Range in ['BPR', 'CE'].
+#loss_type: 'BPR' 
+loss_type: 'CE' 
+ac_conv : 'relu'
+ac_fc : 'relu'
+drop_ratio: 0.3                # (float) The probability of an element to be zeroed.
+n_t : 2
+n_k : 5
+vec_dim : 25
+alpha : 0.1

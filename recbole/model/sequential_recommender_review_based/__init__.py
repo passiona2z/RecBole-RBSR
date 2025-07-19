@@ -1,0 +1,4 @@
+from recbole.model.sequential_recommender_review_based.cca import CCA
+from recbole.model.sequential_recommender_review_based.pirsp import PIRSP
+from recbole.model.sequential_recommender_review_based.intentrec import IntentRec
+from recbole.model.sequential_recommender_review_based.rns import RNS

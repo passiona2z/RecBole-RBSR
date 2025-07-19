@@ -476,6 +476,111 @@ class MultiHeadAttention(nn.Module):
         return hidden_states
 
 
+class MultiHeadAttention_with_crossattn(nn.Module):
+
+    """
+    (3) MultiHeadAttention : 실질적 연산 수행 
+        (our process) self attn : 따로 / cross attn : 따로 MultiHeadAttention 호출  
+            ※ 그러므로 파라미터는 각각 초기화되어서 학습 : 여기서 구분할 필요는 없음
+        
+    def __init__ : ※ 동일함
+
+    def forward : encoder_hidden_states, encoder_attention_mask 추가 : 기본 None
+
+        if encoder_hidden_states is not None 
+            key, value > encoder_hidden_states(review cls) 사용
+
+    """
+
+    """
+    Multi-head Self-attention layers, a attention score dropout layer is introduced.
+
+    Args:
+        input_tensor (torch.Tensor): the input of the multi-head self-attention layer
+        attention_mask (torch.Tensor): the attention mask for input tensor
+
+    Returns:
+        hidden_states (torch.Tensor): the output of the multi-head self-attention layer
+
+    """
+
+    def __init__(self, n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps):
+        super(MultiHeadAttention_with_crossattn, self).__init__()
+        
+        if hidden_size % n_heads != 0:
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number of attention "
+                "heads (%d)" % (hidden_size, n_heads)
+            )
+
+        self.num_attention_heads = n_heads
+        self.attention_head_size = int(hidden_size / n_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size    # 2 * 32
+
+        self.query = nn.Linear(hidden_size, self.all_head_size)  # length, 64
+        self.key = nn.Linear(hidden_size, self.all_head_size)
+        self.value = nn.Linear(hidden_size, self.all_head_size)
+
+        self.attn_dropout = nn.Dropout(attn_dropout_prob)                           # drop 1
+
+        self.dense = nn.Linear(hidden_size, hidden_size)
+        self.LayerNorm = nn.LayerNorm(hidden_size, eps=layer_norm_eps)
+        self.out_dropout = nn.Dropout(hidden_dropout_prob)                          # drop 2
+
+    def transpose_for_scores(self, x):
+        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)   # B, 20, 2, 32
+        x = x.view(*new_x_shape)
+        return x.permute(0, 2, 1, 3)                                                         # B, 2, 20, 32
+
+    def forward(self, input_tensor, attention_mask, 
+        encoder_hidden_states=None, encoder_attention_mask=None):
+
+        mixed_query_layer = self.query(input_tensor)
+        
+        is_cross_attention = encoder_hidden_states is not None
+            
+        # 멀티모달 / encoder_hidden_states : B, 20, 64
+        if is_cross_attention:
+            mixed_key_layer = self.key(encoder_hidden_states)                   
+            mixed_value_layer = self.value(encoder_hidden_states)
+            attention_mask = encoder_attention_mask                             # 키(cls) 기준으로 attention_mask(encoder_attention_mask) 교체 : [B, 1, 1, L]            
+
+        # 기존
+        else : 
+            mixed_key_layer = self.key(input_tensor)
+            mixed_value_layer = self.value(input_tensor)
+
+        query_layer = self.transpose_for_scores(mixed_query_layer)                     # B, 2, 20, 32
+        key_layer = self.transpose_for_scores(mixed_key_layer)                         # B, 2, 20, 32 
+        value_layer = self.transpose_for_scores(mixed_value_layer)
+
+        # Take the dot product between "query" and "key" to get the raw attention scores.
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))      # B, 2, 20, 20
+
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+        # [batch_size heads seq_len seq_len] scores
+        # [batch_size 1 1 seq_len]
+
+        attention_scores = attention_scores + attention_mask                           # 브로드캐스팅 : 참조할 수 없는 키(cls)는 마스킹
+
+        attention_probs = nn.Softmax(dim=-1)(attention_scores)                         # 어텐션 스코어 softmax
+            
+        # This is actually dropping out entire tokens to attend to, which might
+        # seem a bit unusual, but is taken from the original Transformer paper.
+
+        attention_probs = self.attn_dropout(attention_probs)                           # 더 0 으로 만들어질 것
+        context_layer = torch.matmul(attention_probs, value_layer)                     # B, 2, 20, 32 
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()                 # B, 20, 2, 32
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(*new_context_layer_shape)                   # B, 20, 64
+        hidden_states = self.dense(context_layer)
+        hidden_states = self.out_dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states + input_tensor)                   # add & norm
+
+        return hidden_states  # 히든넘김
+
+
 class FeedForward(nn.Module):
     """
     Point-wise feed-forward layer is implemented by two dense layers.
@@ -576,6 +681,77 @@ class TransformerLayer(nn.Module):
         return feedforward_output
 
 
+class TransformerLayer_with_crossattn(nn.Module):
+
+    """
+    (2) TransformerLayer > MultiHeadAttention
+    def __init__ > add_cross_attn 추가 : 기본 false
+
+        if add_cross_attn > True 일때 MultiHeadAttention layer 추가함 (기본 초기화값은 같음)
+        
+        
+    def forward : encoder_hidden_states, encoder_attention_mask 추가 : 기본 None
+
+        if encoder_hidden_states 값이 있으면,  self.cross_attention(MultiHeadAttention) layer 하나 더 거침
+            self.cross_attention(attention_output, attention_mask, encoder_hidden_states, encoder_attention_mask)
+            
+        그리고 똑같이 feed_forward 수행
+    """
+
+    """
+    One transformer layer consists of a multi-head self-attention layer and a point-wise feed-forward layer.
+
+    Args:
+        hidden_states (torch.Tensor): the input of the multi-head self-attention sublayer
+        attention_mask (torch.Tensor): the attention mask for the multi-head self-attention sublayer
+
+    Returns:
+        feedforward_output (torch.Tensor): The output of the point-wise feed-forward sublayer,
+                                           is the output of the transformer layer.
+
+    """
+
+    def __init__(
+        self,
+        n_heads,
+        hidden_size,
+        intermediate_size,
+        hidden_dropout_prob,
+        attn_dropout_prob,
+        hidden_act,
+        layer_norm_eps,
+        add_cross_attn = False
+    ):
+        super(TransformerLayer_with_crossattn, self).__init__()
+        self.multi_head_attention = MultiHeadAttention_with_crossattn(
+            n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps, 
+        )
+        
+        if add_cross_attn :
+            self.cross_attention = MultiHeadAttention_with_crossattn(
+            n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps)
+            
+        self.feed_forward = FeedForward(
+            hidden_size,
+            intermediate_size,
+            hidden_dropout_prob,
+            hidden_act,
+            layer_norm_eps,
+        )
+
+    def forward(self, hidden_states, attention_mask, encoder_hidden_states = None, encoder_attention_mask = None):
+        
+        attention_output = self.multi_head_attention(hidden_states, attention_mask)
+
+        # 포워드 : attention_mask 어차피 바뀜
+        if encoder_hidden_states is not None : 
+            attention_output = self.cross_attention(attention_output, attention_mask, encoder_hidden_states, encoder_attention_mask)  
+            
+        feedforward_output = self.feed_forward(attention_output)      
+        
+        return feedforward_output
+
+
 class TransformerEncoder(nn.Module):
     r"""One TransformerEncoder consists of several TransformerLayers.
 
@@ -630,6 +806,85 @@ class TransformerEncoder(nn.Module):
         all_encoder_layers = []
         for layer_module in self.layer:
             hidden_states = layer_module(hidden_states, attention_mask)
+            if output_all_encoded_layers:
+                all_encoder_layers.append(hidden_states)
+        if not output_all_encoded_layers:
+            all_encoder_layers.append(hidden_states)
+        return all_encoder_layers
+
+
+class TransformerEncoder_with_crossattn(nn.Module):
+
+    r"""
+    (1) TransformerEncoder > TransformerLayer
+    def __init__ > add_cross_attn 추가 : 기본 false
+        TransformerLayer 호출 : add_cross_attn 추가
+        
+    def forward : encoder_hidden_states, encoder_attention_mask 추가 : 기본 None
+        layer_module(TransformerLayer) > encoder_hidden_states, encoder_attention_mask 추가 입력
+        
+        for layer_module in self.layer:
+        hidden_states = layer_module(hidden_states, attention_mask, encoder_hidden_states, encoder_attention_mask)
+    """
+
+
+    r"""One TransformerEncoder consists of several TransformerLayers.
+
+    Args:
+        n_layers(num): num of transformer layers in transformer encoder. Default: 2
+        n_heads(num): num of attention heads for multi-head attention layer. Default: 2
+        hidden_size(num): the input and output hidden size. Default: 64
+        inner_size(num): the dimensionality in feed-forward layer. Default: 256
+        hidden_dropout_prob(float): probability of an element to be zeroed. Default: 0.5
+        attn_dropout_prob(float): probability of an attention score to be zeroed. Default: 0.5
+        hidden_act(str): activation function in feed-forward layer. Default: 'gelu'
+                      candidates: 'gelu', 'relu', 'swish', 'tanh', 'sigmoid'
+        layer_norm_eps(float): a value added to the denominator for numerical stability. Default: 1e-12
+
+    """
+
+    # 수정
+    def __init__(
+        self,
+        n_layers=2,
+        n_heads=2,
+        hidden_size=64,
+        inner_size=256,
+        hidden_dropout_prob=0.5,
+        attn_dropout_prob=0.5,
+        hidden_act="gelu",
+        layer_norm_eps=1e-12,
+        add_cross_attn = False
+    ):
+        super(TransformerEncoder_with_crossattn, self).__init__()
+        # 수정
+        layer = TransformerLayer_with_crossattn(
+            n_heads,
+            hidden_size,
+            inner_size,
+            hidden_dropout_prob,
+            attn_dropout_prob,
+            hidden_act,
+            layer_norm_eps,
+            add_cross_attn
+        )
+        self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(n_layers)])  # layer > List
+
+    def forward(self, hidden_states, attention_mask, encoder_hidden_states=None, encoder_attention_mask=None, output_all_encoded_layers=True):
+        """
+        Args:
+            hidden_states (torch.Tensor): the input of the TransformerEncoder
+            attention_mask (torch.Tensor): the attention mask for the input hidden_states
+            output_all_encoded_layers (Bool): whether output all transformer layers' output
+
+        Returns:
+            all_encoder_layers (list): if output_all_encoded_layers is True, return a list consists of all transformer
+            layers' output, otherwise return a list only consists of the output of last transformer layer.
+
+        """
+        all_encoder_layers = []
+        for layer_module in self.layer:
+            hidden_states = layer_module(hidden_states, attention_mask, encoder_hidden_states, encoder_attention_mask)
             if output_all_encoded_layers:
                 all_encoder_layers.append(hidden_states)
         if not output_all_encoded_layers:
@@ -864,6 +1119,92 @@ class LightTransformerEncoder(nn.Module):
         if not output_all_encoded_layers:
             all_encoder_layers.append(hidden_states)
         return all_encoder_layers
+
+# for CCA
+class CCALayer(nn.Module):
+    """
+    Cross-Attention Block : In paper, use 1 block > so, need layer (encoder X)
+    """
+
+    def __init__(
+        self,
+        n_heads,
+        hidden_size,
+        inner_size,
+        hidden_dropout_prob,
+        attn_dropout_prob,
+        hidden_act,
+        layer_norm_eps
+    ):
+        super(CCALayer, self).__init__()
+
+
+        self.cross_attention = MultiHeadAttention_CCA(
+            n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps)
+
+        # 한층만 쌓음 : https://github.com/BING303/CCA/blob/main/CCA.py#L987
+        self.dense = nn.Linear(hidden_size, 1)
+
+    
+
+    def forward(self, hidden_states, attention_mask, encoder_hidden_states, encoder_attention_mask):
+        
+
+        attention_output = self.cross_attention(hidden_states, attention_mask, encoder_hidden_states, encoder_attention_mask)  
+            
+        feedforward_output = self.dense(attention_output)      
+        
+        return feedforward_output
+
+
+# for CCA (CCALayer)
+class MultiHeadAttention_CCA(MultiHeadAttention_with_crossattn):
+ 
+
+    def __init__(self, n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps):
+        
+        super(MultiHeadAttention_CCA, self).__init__(n_heads, hidden_size, hidden_dropout_prob, attn_dropout_prob, layer_norm_eps)
+        
+        
+    def forward(self, input_tensor, attention_mask, 
+        encoder_hidden_states, encoder_attention_mask):
+
+        mixed_query_layer = self.query(input_tensor)                                   # B, 1, 64
+        mixed_key_layer = self.key(encoder_hidden_states)                   
+        mixed_value_layer = self.value(encoder_hidden_states)
+        attention_mask = encoder_attention_mask                                        # 키(cls) 기준 : 128, 1, 1, 20
+            
+        query_layer = self.transpose_for_scores(mixed_query_layer)                     # B, 2, 1, 32
+
+        key_layer = self.transpose_for_scores(mixed_key_layer)                         # B, 2, 20, 32 
+        value_layer = self.transpose_for_scores(mixed_value_layer)
+
+        # Take the dot product between "query" and "key" to get the raw attention scores.
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))      # B, 2, 1, 20
+
+
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+        # [batch_size heads seq_len seq_len] scores
+        # [batch_size 1 1 seq_len]
+
+        attention_scores = attention_scores + attention_mask                           # 브로드캐스팅 : 참조할 수 없는 키(cls)는 마스킹
+        attention_probs = nn.Softmax(dim=-1)(attention_scores)                         # 어텐션 스코어 softmax
+        # This is actually dropping out entire tokens to attend to, which might
+        # seem a bit unusual, but is taken from the original Transformer paper.
+
+        attention_probs = self.attn_dropout(attention_probs)                           # 더 0 으로 만들어질 것
+        context_layer = torch.matmul(attention_probs, value_layer)                    
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()                 # B, 2, 1, 32
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(*new_context_layer_shape)                   # B, 1, 64
+        hidden_states = self.dense(context_layer)
+        hidden_states = self.out_dropout(hidden_states)
+        hidden_states += input_tensor                                                  # add만 적용
+        #https://github.com/BING303/CCA/blob/main/CCA.py#L607
+        #hidden_states = self.LayerNorm(hidden_states + input_tensor)                  # add & norm 미적용
+
+        return hidden_states  # 히든넘김
 
 
 class ContextSeqEmbAbstractLayer(nn.Module):

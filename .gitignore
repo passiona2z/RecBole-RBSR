@@ -6,8 +6,10 @@
 .idea/
 *.pyc
 *.log
-log_tensorboard
+log_tensorboard/
+log/
 saved/
+dataset/CLS/
 *.lprof
 *.egg-info/
 docs/build/
