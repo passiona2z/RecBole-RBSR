@@ -29,11 +29,18 @@
 ## **Implemented Models**  
 | Model      | Paper |
 |------------|-------------|
-| **RNS**       | A Review-Driven Neural Model for Sequential Recommendation (2019, IJCAI) |
-| **PIRSP**    | Integrates review-based user-item interactions into sequential modeling (2021, EAAI) |
-| **CCA**      | Cascaded Cross Attention for Review-based Sequential Recommendation (2023, ICDM) |
-| **IntentRec**| IntentRec: Incorporating latent user intent via contrastive alignment for sequential recommendation (2025, ECRA) | 
+| **RNS**       | [A Review-Driven Neural Model for Sequential Recommendation](https://www.ijcai.org/proceedings/2019/397) (2019, IJCAI) [[code]](https://github.com/WHUIR/RNS) |
+| **PIRSP**    | [Integrates review-based user-item interactions into sequential modeling](https://www.sciencedirect.com/science/article/pii/S0952197621001962) (2021, EAAI) |
+| **CCA**      | [Cascaded Cross Attention for Review-based Sequential Recommendation](https://ieeexplore.ieee.org/abstract/document/10415676) (2023, ICDM) [[code]](https://github.com/BING303/CCA)|
+| **IntentRec**| [IntentRec: Incorporating latent user intent via contrastive alignment for sequential recommendation](https://www.sciencedirect.com/science/article/abs/pii/S156742232500047X) (2025, ECRA) | 
 | |
+
+
+- (Note)
+  - The origin code of RNS and CCA was revised for the RecBole library.
+  - PIRSP extends RNS with an item sequence encoder.
+  - IntentRec is the contributor's own paper and implementation.
+
 
 ## Dataset
 [Amazon Review 5-core dataset](https://jmcauley.ucsd.edu/data/amazon/index_2014.html)
@@ -42,7 +49,7 @@
   - Musical Instruments (MI)
   - Automotive (AM)
 
-- Data conversion scripts Based on [RecSysDatasets](https://github.com/RUCAIBox/RecSysDatasets) will be update soon 
+- Data conversion scripts based on [RecSysDatasets](https://github.com/RUCAIBox/RecSysDatasets) will be update soon. 
 
 ## Example Usage
 
